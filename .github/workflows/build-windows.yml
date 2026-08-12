@@ -20,8 +20,10 @@ jobs:
           pyinstaller --onefile --windowed --name DiskCleaner
           --icon disk-cleaner.ico
           --version-file packaging/version.txt
+          --hidden-import diskkit.__main__
           --add-data "disk-cleaner.ico;."
           --collect-submodules psutil
+          --collect-all customtkinter
           disk_cleaner_app.py
       - name: Stage installer inputs
         shell: pwsh
@@ -41,4 +43,10 @@ jobs:
           path: |
             dist/DiskCleaner.exe
             packaging/dist/DiskCleaner-Setup.exe
+          if-no-files-found: error
+      - name: Upload staging (for signed repack)
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-cleaner-staging
+          path: packaging/staging
           if-no-files-found: error
