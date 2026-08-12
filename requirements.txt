@@ -1,0 +1,3 @@
+# Disk Cleaner & Info runtime deps — permissive/weak-copyleft only, no AGPL/proprietary.
+psutil>=5.9
+send2trash>=1.8

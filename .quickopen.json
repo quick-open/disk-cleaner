@@ -1,0 +1,13 @@
+{
+  "slug": "disk-cleaner",
+  "name": "Disk Cleaner & Info",
+  "tagline": "Reclaim space and see what's using it \u2014 temp/cache cleanup, large-file finder, live system monitor.",
+  "categorySlug": "disk-cleanup",
+  "license": "Apache-2.0",
+  "description": "Scan and clean temporary files, browser and app caches, and the Recycle Bin (with a safe preview and size report); find the largest files and folders eating your disk; visualize disk usage by folder; and watch live CPU, memory, disk and network usage. Deletions go to the Recycle Bin by default. Runs locally, nothing uploaded.",
+  "aiStack": "Python (tkinter + CLI), psutil, send2trash",
+  "platforms": [
+    "windows"
+  ],
+  "buildEntry": "disk_cleaner_app.py"
+}
