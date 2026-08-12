@@ -1,10 +1,11 @@
 r"""Cleanup targets, scanning, and (safe) cleaning.
 
 Targets are declared as *data* -- a name, a human description, and a list of
-path specs written with Windows environment variables (``%TEMP%``,
-``%LOCALAPPDATA%\Temp``, browser cache folders, ...).  A spec is either a
-directory (whose direct children are the deletable units) or a glob such as
-``%TEMP%\*.tmp``.
+path specs.  The table is chosen at import time from the running OS: Windows
+specs use ``%TEMP%`` / ``%LOCALAPPDATA%\Temp`` style paths, while Linux/macOS
+specs use ``$TMPDIR`` / ``$XDG_CACHE_HOME`` / ``~/.cache`` style paths (the
+freedesktop XDG layout).  A spec is either a directory (whose direct children
+are the deletable units) or a glob such as ``~/.cache/*/Cache``.
 
 Two operations sit on top of that data:
 
@@ -17,8 +18,8 @@ Two operations sit on top of that data:
 
 Both accept an optional ``env`` (an environment mapping) and an optional
 ``roots`` override (``{target_id: [directory, ...]}``).  Those two hooks make
-the whole Windows-shaped target table testable headless on Linux: point a
-target at a temp tree and exercise the real scan/clean code paths.
+the target table testable headless on any OS: point a target at a temp tree and
+exercise the real scan/clean code paths.
 
 Emptying the Recycle Bin itself is a separate, explicit call
 (:func:`empty_recycle_bin`) -- it is never triggered by ``clean_targets``.
@@ -58,10 +59,17 @@ class Target:
 
 
 # ---------------------------------------------------------------------------
-# The target table.  Windows-first paths; harmless (they simply resolve to
-# nothing) on other platforms.
+# The target tables.  Cleanup locations differ per OS, so the table is chosen at
+# import time from the running platform (:data:`TARGETS`).  ``%VAR%`` (Windows)
+# and ``$VAR`` / ``~`` (POSIX) specs are both understood by :func:`common.expand`;
+# specs that resolve to nothing on the current host are simply skipped.
+#
+# Both tables keep a cross-platform ``user_temp`` id (the per-user scratch dir)
+# so callers/tests can reference it without probing the OS.  Windows exposes the
+# Recycle Bin as a ``special`` target (emptied via the shell API, not by path);
+# on POSIX the freedesktop.org Trash is an ordinary path target instead.
 # ---------------------------------------------------------------------------
-TARGETS = [
+_WINDOWS_TARGETS = [
     Target(
         "user_temp", "User temp files",
         "Your per-user %TEMP% folder — installers, scratch files and app leftovers.",
@@ -131,6 +139,65 @@ TARGETS = [
         [], special="recycle_bin",
     ),
 ]
+
+# POSIX (Linux / macOS) cleanup locations.  Caches live under the XDG cache dir
+# (``$XDG_CACHE_HOME``, default ``~/.cache``); each target lists the explicit
+# ``$XDG_*`` form first and the ``~/...`` default second, so it resolves whether
+# or not XDG_* is exported (duplicates are de-duplicated by absolute path).
+_POSIX_TARGETS = [
+    Target(
+        "user_temp", "Temporary files",
+        "Per-user scratch/temp files ($TMPDIR and the system /tmp, /var/tmp).",
+        [r"$TMPDIR", "/tmp", "/var/tmp"],
+    ),
+    Target(
+        "trash", "Trash",
+        "Files you have moved to Trash, still occupying disk space.",
+        [
+            r"$XDG_DATA_HOME/Trash/files", r"$XDG_DATA_HOME/Trash/info",
+            "~/.local/share/Trash/files", "~/.local/share/Trash/info",
+        ],
+    ),
+    Target(
+        "thumbnail_cache", "Thumbnail cache",
+        "The desktop thumbnail cache (~/.cache/thumbnails) — rebuilt on demand.",
+        [r"$XDG_CACHE_HOME/thumbnails", "~/.cache/thumbnails"],
+    ),
+    Target(
+        "chrome_cache", "Chrome cache",
+        "Google Chrome's on-disk web cache (safe to clear; pages just re-download).",
+        [
+            r"$XDG_CACHE_HOME/google-chrome/*/Cache", "~/.cache/google-chrome/*/Cache",
+            r"$XDG_CACHE_HOME/google-chrome/*/Code Cache", "~/.cache/google-chrome/*/Code Cache",
+            r"$XDG_CACHE_HOME/google-chrome/*/GPUCache", "~/.cache/google-chrome/*/GPUCache",
+        ],
+    ),
+    Target(
+        "chromium_cache", "Chromium cache",
+        "Chromium's on-disk web cache.",
+        [
+            r"$XDG_CACHE_HOME/chromium/*/Cache", "~/.cache/chromium/*/Cache",
+            r"$XDG_CACHE_HOME/chromium/*/Code Cache", "~/.cache/chromium/*/Code Cache",
+            r"$XDG_CACHE_HOME/chromium/*/GPUCache", "~/.cache/chromium/*/GPUCache",
+        ],
+    ),
+    Target(
+        "firefox_cache", "Firefox cache",
+        "Mozilla Firefox's disk cache across all profiles.",
+        [
+            r"$XDG_CACHE_HOME/mozilla/firefox/*/cache2", "~/.cache/mozilla/firefox/*/cache2",
+        ],
+    ),
+    Target(
+        "pip_cache", "pip download cache",
+        "Cached Python wheels/downloads (~/.cache/pip) — re-fetched on demand.",
+        [r"$XDG_CACHE_HOME/pip", "~/.cache/pip"],
+    ),
+]
+
+# Pick the table for the running OS.  ``os.name == "nt"`` selects Windows; every
+# other platform (Linux, macOS, *BSD) uses the POSIX table.
+TARGETS = _WINDOWS_TARGETS if os.name == "nt" else _POSIX_TARGETS
 
 TARGETS_BY_ID = {t.id: t for t in TARGETS}
 

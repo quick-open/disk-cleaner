@@ -12,6 +12,8 @@ import os
 
 import pytest
 
+_IS_WINDOWS = os.name == "nt"
+
 from diskkit import (
     DiskKitError,
     clean_targets,
@@ -97,13 +99,13 @@ def test_scan_empty_target_is_zero(tmp_path):
     assert report["user_temp"]["bytes"] == 0
 
 
-def test_scan_dedupes_overlapping_specs(tmp_path, monkeypatch):
+def test_scan_dedupes_overlapping_specs(tmp_path):
     # A target whose specs resolve to the SAME directory must not double-count.
+    # Two identical roots (via the roots override) exercise the dedupe path on
+    # every OS without depending on platform-specific env-var expansion.
     _write(str(tmp_path / "x.bin"), 400)
-    monkeypatch.setenv("TEMP", str(tmp_path))
-    monkeypatch.setenv("TMP", str(tmp_path))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nope"))  # keep 3rd spec empty
-    report = scan_targets(["user_temp"])  # user_temp has %TEMP%, %TMP%, %LOCALAPPDATA%\Temp
+    roots = {"user_temp": [str(tmp_path), str(tmp_path)]}
+    report = scan_targets(["user_temp"], roots=roots)
     assert report["user_temp"]["files"] == 1
     assert report["user_temp"]["bytes"] == 400
 
@@ -113,10 +115,57 @@ def test_scan_unknown_target_raises():
         scan_targets(["does_not_exist"])
 
 
-def test_scan_all_targets_includes_recycle_bin():
+def test_scan_all_targets_match_target_ids():
     report = scan_targets(None)
     assert set(report) == set(target_ids())
+
+
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Recycle Bin is a Windows-only target")
+def test_scan_all_targets_includes_recycle_bin():
+    report = scan_targets(None)
     assert report["recycle_bin"]["special"] == "recycle_bin"
+
+
+@pytest.mark.skipif(_IS_WINDOWS, reason="POSIX (Linux/macOS) target table")
+def test_posix_target_table_is_linux_shaped():
+    """On AIQuick/Linux the table auto-detects and exposes XDG/Unix targets."""
+    ids = set(target_ids())
+    # Windows-only ids must be gone; Unix ids present.
+    assert "recycle_bin" not in ids
+    assert "windows_temp" not in ids
+    assert {"user_temp", "trash", "thumbnail_cache", "pip_cache"} <= ids
+    # No target may carry a Windows drive letter, backslash, or %VAR% spec.
+    for target in cleaners.TARGETS:
+        for spec in target.patterns:
+            assert "\\" not in spec, spec
+            assert "%" not in spec, spec
+            assert not (len(spec) > 1 and spec[1] == ":"), spec  # no C:/D: drives
+        assert target.special is None  # no shell-special targets on POSIX
+    # The trash target points at the freedesktop location, not a Recycle Bin.
+    trash = cleaners.TARGETS_BY_ID["trash"]
+    assert any(".local/share/Trash" in p or "XDG_DATA_HOME" in p
+               for p in trash.patterns)
+
+
+@pytest.mark.skipif(_IS_WINDOWS, reason="POSIX (Linux/macOS) target table")
+def test_posix_cache_target_resolves_via_xdg(tmp_path, monkeypatch):
+    """A real Linux cache path (pip) is auto-detected and sized correctly."""
+    # Isolate both the XDG cache dir and HOME so the real ~/.cache/pip on the
+    # host machine is never counted.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _write(str(tmp_path / "pip" / "wheels" / "w.bin"), 700)
+    report = scan_targets(["pip_cache"])
+    assert report["pip_cache"]["files"] == 1
+    assert report["pip_cache"]["bytes"] == 700
+
+
+def test_windows_target_table_intact():
+    """The Windows table (used when os.name=='nt') still carries its targets."""
+    ids = {t.id for t in cleaners._WINDOWS_TARGETS}
+    assert {"user_temp", "windows_temp", "recycle_bin"} <= ids
+    rb = next(t for t in cleaners._WINDOWS_TARGETS if t.id == "recycle_bin")
+    assert rb.special == "recycle_bin"
 
 
 # --- clean_targets ----------------------------------------------------------
@@ -142,13 +191,14 @@ def test_clean_only_touches_selected_root(tmp_path):
     bystander = tmp_path / "keep"
     _write(str(target_root / "junk.tmp"), 800)
     _write(str(bystander / "important.txt"), 1234)
-    roots = {"windows_temp": [str(target_root)]}
-    freed = clean_targets(["windows_temp"], to_trash=False, roots=roots)
+    roots = {"user_temp": [str(target_root)]}
+    freed = clean_targets(["user_temp"], to_trash=False, roots=roots)
     assert freed == 800
     assert not (target_root / "junk.tmp").exists()
     assert (bystander / "important.txt").exists()  # never in scope
 
 
+@pytest.mark.skipif(not _IS_WINDOWS, reason="Recycle Bin is a Windows-only target")
 def test_clean_special_target_is_noop(tree):
     # Recycle Bin is special: clean_targets ignores it (no crash, frees 0).
     freed = clean_targets(["recycle_bin"], to_trash=False)
