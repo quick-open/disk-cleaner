@@ -39,7 +39,7 @@ from .sysinfo import (
 )
 from .monitor import sample, sample_for
 
-__version__ = "1.0.0"
+__version__ = "1.0.7"
 
 __all__ = [
     "DiskKitError",
