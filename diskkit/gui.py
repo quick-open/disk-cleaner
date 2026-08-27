@@ -338,6 +338,22 @@ def build_app():
             ctk.CTkCheckBox(top, text="Delete permanently (skip Recycle Bin)",
                             variable=self._clean_perm,
                             font=aura.font()).pack(side="left", padx=14)
+            # Quick OS 0.6.0 (Storage Sense parity): a weekly, unattended
+            # clean of every target INTO the Recycle Bin (recoverable), run by
+            # a per-user systemd timer. Linux only; off unless the user ticks it.
+            if _timer_supported():
+                self._clean_auto = tk.BooleanVar(value=_timer_enabled())
+                ctk.CTkCheckBox(top, text="Clean automatically every week (to the Recycle Bin)",
+                                variable=self._clean_auto, command=self._clean_toggle_auto,
+                                font=aura.font()).pack(side="left", padx=14)
+
+        def _clean_toggle_auto(self):
+            from tkinter import messagebox
+            try:
+                _timer_set(bool(self._clean_auto.get()))
+            except Exception as exc:  # noqa: BLE001
+                self._clean_auto.set(_timer_enabled())
+                messagebox.showerror("Disk Cleaner", f"Could not change the weekly clean: {exc}")
 
             mid = aura.Card(frame, title="Cleanup targets", padding=12)
             mid.pack(fill="both", expand=True, pady=12)
@@ -932,3 +948,54 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# ---- Quick OS 0.6.0: weekly automatic clean (per-user systemd timer) -------
+_TIMER = "diskkit-weekly-clean"
+
+
+def _timer_supported():
+    import shutil, sys
+    return sys.platform.startswith("linux") and shutil.which("systemctl") is not None
+
+
+def _timer_dir():
+    import os
+    d = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                     "systemd", "user")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _timer_enabled():
+    import subprocess
+    try:
+        r = subprocess.run(["systemctl", "--user", "is-enabled", _TIMER + ".timer"],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() == "enabled"
+    except Exception:
+        return False
+
+
+def _timer_set(on):
+    import os, shutil, subprocess, sys
+    d = _timer_dir()
+    exe = shutil.which("quickopen-disk-cleaner") or f"{sys.executable} -m diskkit"
+    if on:
+        with open(os.path.join(d, _TIMER + ".service"), "w") as f:
+            f.write("[Unit]\nDescription=Disk Cleaner: weekly clean into the Recycle Bin\n\n"
+                    "[Service]\nType=oneshot\n"
+                    f"ExecStart={exe} clean --yes\n")
+        with open(os.path.join(d, _TIMER + ".timer"), "w") as f:
+            f.write("[Unit]\nDescription=Disk Cleaner: weekly clean\n\n"
+                    "[Timer]\nOnCalendar=weekly\nPersistent=true\nRandomizedDelaySec=1h\n\n"
+                    "[Install]\nWantedBy=timers.target\n")
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=10)
+        subprocess.run(["systemctl", "--user", "enable", "--now", _TIMER + ".timer"], check=True, timeout=10)
+    else:
+        subprocess.run(["systemctl", "--user", "disable", "--now", _TIMER + ".timer"], check=False, timeout=10)
+        for ext in (".timer", ".service"):
+            try:
+                os.unlink(os.path.join(d, _TIMER + ext))
+            except OSError:
+                pass
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=10)
