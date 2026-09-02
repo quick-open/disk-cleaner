@@ -1,6 +1,6 @@
 ; Inno Setup — Disk Cleaner & Info. Signed single-file installer, compiled in CI.
 #define AppName "Disk Cleaner & Info"
-#define AppVersion "1.0.8"
+#define AppVersion "1.0.9"
 
 [Setup]
 AppMutex=QuickOpen.DiskCleaner
@@ -42,7 +42,7 @@ WizardSmallImageFile=branding\wizard-small.bmp
 AppCopyright=Apache-2.0. 100%% AI-built, published on QuickOpen (quickopen.ai).
 VersionInfoCompany=QuickOpen
 VersionInfoProductName=Disk Cleaner & Info
-VersionInfoVersion=1.0.8.0
+VersionInfoVersion=1.0.9.0
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesInstallIn64BitMode=x64compatible
