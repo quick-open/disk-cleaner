@@ -31,7 +31,7 @@ jobs:
           $stage = "packaging/staging"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item dist/DiskCleaner.exe $stage/
-          Copy-Item quickopen-root.crt, README.md, LICENSE $stage/ -ErrorAction SilentlyContinue
+          Copy-Item README.md, LICENSE $stage/ -ErrorAction SilentlyContinue
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Compile installer
